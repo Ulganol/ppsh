@@ -14,6 +14,20 @@ Future<void> main() async {
   runApp(App(app));
 }
 
+final bool isDesktop = Platform.isWindows || Platform.isLinux || Platform.isMacOS;
+
+ThemeData _theme(Brightness b) => ThemeData(
+      useMaterial3: true,
+      colorSchemeSeed: Colors.teal,
+      brightness: b,
+      visualDensity: isDesktop ? VisualDensity.compact : VisualDensity.standard,
+      inputDecorationTheme: InputDecorationTheme(
+        isDense: isDesktop,
+        border: OutlineInputBorder(borderRadius: BorderRadius.circular(isDesktop ? 10 : 24)),
+      ),
+      appBarTheme: AppBarTheme(toolbarHeight: isDesktop ? 52 : null, scrolledUnderElevation: 0),
+    );
+
 class AppState extends ChangeNotifier {
   late Settings settings;
   final rooms = <Room>[];
@@ -82,8 +96,11 @@ class App extends StatelessWidget {
           title: 'P2P Chat',
           debugShowCheckedModeBanner: false,
           themeMode: app.settings.dark ? ThemeMode.dark : ThemeMode.light,
-          theme: ThemeData(useMaterial3: true, colorSchemeSeed: Colors.teal, brightness: Brightness.light),
-          darkTheme: ThemeData(useMaterial3: true, colorSchemeSeed: Colors.teal, brightness: Brightness.dark),
+          theme: _theme(Brightness.light),
+          darkTheme: _theme(Brightness.dark),
+          builder: (ctx, child) => isDesktop
+              ? MediaQuery(data: MediaQuery.of(ctx).copyWith(textScaler: const TextScaler.linear(0.9)), child: child!)
+              : child!,
           home: Home(app),
         ),
       );
@@ -114,38 +131,64 @@ class Home extends StatelessWidget {
       });
 }
 
+void openSettings(BuildContext context, AppState app) {
+  if (isDesktop) {
+    showDialog(
+      context: context,
+      builder: (d) => AlertDialog(
+        title: const Text('Настройки'),
+        content: SizedBox(width: 440, child: SingleChildScrollView(child: SettingsBody(app))),
+        actions: [TextButton(onPressed: () => Navigator.pop(d), child: const Text('Закрыть'))],
+      ),
+    );
+  } else {
+    Navigator.push(context, MaterialPageRoute(builder: (_) => SettingsPage(app)));
+  }
+}
+
 class ChatList extends StatelessWidget {
   final AppState app;
   const ChatList(this.app, {super.key});
   @override
-  Widget build(BuildContext context) => Scaffold(
-        appBar: AppBar(title: const Text('Чаты'), actions: [
-          IconButton(
-              icon: const Icon(Icons.settings),
-              onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => SettingsPage(app)))),
-        ]),
-        floatingActionButton: FloatingActionButton(onPressed: () => joinDialog(context, app), child: const Icon(Icons.add)),
-        body: app.rooms.isEmpty
-            ? const Center(child: Text('Нет чатов. Нажмите +'))
-            : ListView(children: [
-                for (final r in app.rooms)
-                  ListTile(
-                    selected: r == app.active,
-                    leading: CircleAvatar(child: Text(r.info.title.isEmpty ? '?' : r.info.title[0].toUpperCase())),
-                    title: Text(r.info.title, maxLines: 1, overflow: TextOverflow.ellipsis),
-                    subtitle: Text(
-                        r.msgs.isEmpty ? 'Нет сообщений' : (r.msgs.last.file != null ? '📎 ${r.msgs.last.file!.name}' : r.msgs.last.text),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis),
-                    trailing: Row(mainAxisSize: MainAxisSize.min, children: [
-                      Icon(Icons.circle, size: 10, color: r.peers.isNotEmpty ? Colors.green : Colors.grey),
-                      const SizedBox(width: 4),
-                      Text('${r.peers.length}'),
-                    ]),
-                    onTap: () => app.select(r),
-                  ),
-              ]),
-      );
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    return Scaffold(
+      backgroundColor: isDesktop ? cs.surfaceContainerLow : null,
+      appBar: AppBar(
+        backgroundColor: isDesktop ? cs.surfaceContainerLow : null,
+        title: const Text('Чаты'),
+        actions: [
+          if (isDesktop)
+            IconButton(icon: const Icon(Icons.add), tooltip: 'Войти в чат', onPressed: () => joinDialog(context, app)),
+          IconButton(icon: const Icon(Icons.settings), tooltip: 'Настройки', onPressed: () => openSettings(context, app)),
+        ],
+      ),
+      floatingActionButton:
+          isDesktop ? null : FloatingActionButton(onPressed: () => joinDialog(context, app), child: const Icon(Icons.add)),
+      body: app.rooms.isEmpty
+          ? const Center(child: Text('Нет чатов. Нажмите +'))
+          : ListView(padding: const EdgeInsets.symmetric(horizontal: 8), children: [
+              for (final r in app.rooms)
+                ListTile(
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                  selected: r == app.active,
+                  selectedTileColor: cs.primaryContainer,
+                  leading: CircleAvatar(child: Text(r.info.title.isEmpty ? '?' : r.info.title[0].toUpperCase())),
+                  title: Text(r.info.title, maxLines: 1, overflow: TextOverflow.ellipsis),
+                  subtitle: Text(
+                      r.msgs.isEmpty ? 'Нет сообщений' : (r.msgs.last.file != null ? '📎 ${r.msgs.last.file!.name}' : r.msgs.last.text),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis),
+                  trailing: Row(mainAxisSize: MainAxisSize.min, children: [
+                    Icon(Icons.circle, size: 10, color: r.peers.isNotEmpty ? Colors.green : Colors.grey),
+                    const SizedBox(width: 4),
+                    Text('${r.peers.length + 1}'),
+                  ]),
+                  onTap: () => app.select(r),
+                ),
+            ]),
+    );
+  }
 }
 
 Future<void> joinDialog(BuildContext ctx, AppState app) async {
@@ -229,6 +272,19 @@ class _ChatViewState extends State<ChatView> {
     } else if (v == 'copy') {
       await Clipboard.setData(ClipboardData(text: r.info.key));
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Ключ скопирован')));
+    } else if (v == 'diag') {
+      showDialog(
+          context: context,
+          builder: (d) => AlertDialog(
+                title: const Text('Диагностика'),
+                content: SizedBox(
+                    width: 480, child: SingleChildScrollView(child: SelectableText(r.diag(), style: const TextStyle(fontSize: 12)))),
+                actions: [
+                  TextButton(
+                      onPressed: () => Clipboard.setData(ClipboardData(text: r.diag())), child: const Text('Копировать')),
+                  TextButton(onPressed: () => Navigator.pop(d), child: const Text('Закрыть')),
+                ],
+              ));
     } else if (v == 'delete') {
       final ok = await showDialog<bool>(
           context: context,
@@ -255,7 +311,8 @@ class _ChatViewState extends State<ChatView> {
               leading: widget.onBack == null ? null : BackButton(onPressed: widget.onBack),
               title: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                 Text(r.info.title),
-                Text('${r.peers.length} онлайн · ник: ${r.info.nick}', style: Theme.of(context).textTheme.bodySmall),
+                Text('${r.peers.length + 1} в сети · трекеры ${r.trackersUp}/${r.trackersTotal} · ник: ${r.info.nick}',
+                    style: Theme.of(context).textTheme.bodySmall),
               ]),
               actions: [
                 PopupMenuButton<String>(
@@ -263,6 +320,7 @@ class _ChatViewState extends State<ChatView> {
                   itemBuilder: (_) => const [
                     PopupMenuItem(value: 'nick', child: Text('Сменить ник')),
                     PopupMenuItem(value: 'copy', child: Text('Скопировать ключ')),
+                    PopupMenuItem(value: 'diag', child: Text('Диагностика')),
                     PopupMenuItem(value: 'delete', child: Text('Удалить чат')),
                   ],
                 ),
@@ -321,7 +379,7 @@ class Bubble extends StatelessWidget {
     return Align(
       alignment: mine ? Alignment.centerRight : Alignment.centerLeft,
       child: ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: 420),
+        constraints: BoxConstraints(maxWidth: isDesktop ? 560 : 420),
         child: Container(
           margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
           padding: const EdgeInsets.all(10),
@@ -391,66 +449,78 @@ class FileTile extends StatelessWidget {
   }
 }
 
-class SettingsPage extends StatefulWidget {
+class SettingsPage extends StatelessWidget {
   final AppState app;
   const SettingsPage(this.app, {super.key});
   @override
-  State<SettingsPage> createState() => _SettingsPageState();
+  Widget build(BuildContext context) => Scaffold(
+        appBar: AppBar(title: const Text('Настройки')),
+        body: SingleChildScrollView(padding: const EdgeInsets.all(16), child: SettingsBody(app)),
+      );
 }
 
-class _SettingsPageState extends State<SettingsPage> {
-  Settings get s => widget.app.settings;
-  static const caps = [0, 500, 1024, 2048, 5120, 10240];
+class SettingsBody extends StatefulWidget {
+  final AppState app;
+  const SettingsBody(this.app, {super.key});
   @override
-  Widget build(BuildContext context) {
-    final cap = caps.contains(s.capMb) ? s.capMb : 2048;
-    return Scaffold(
-      appBar: AppBar(title: const Text('Настройки')),
-      body: ListView(children: [
-        SwitchListTile(
-          title: const Text('Тёмная тема'),
-          value: s.dark,
-          onChanged: (v) {
-            s.dark = v;
+  State<SettingsBody> createState() => _SettingsBodyState();
+}
+
+class _SettingsBodyState extends State<SettingsBody> {
+  Settings get s => widget.app.settings;
+  static const sizes = [5, 10, 25, 50, 100, 250, 500, 1000];
+  static const caps = [0, 500, 1024, 2048, 5120, 10240];
+
+  Widget chips(List<int> vals, int cur, String Function(int) label, void Function(int) set) {
+    final all = {...vals, cur}.toList()..sort();
+    return Wrap(spacing: 8, runSpacing: 4, children: [
+      for (final v in all)
+        ChoiceChip(
+          label: Text(label(v)),
+          selected: v == cur,
+          onSelected: (_) {
+            set(v);
+            Store.prune(s.capMb);
             widget.app.saveSettings();
             setState(() {});
           },
         ),
-        ListTile(
-          title: Text('Автосохранение файлов до ${s.maxFileMb} МБ'),
-          subtitle: Slider(
-            min: 1,
-            max: 500,
-            divisions: 499,
-            value: s.maxFileMb.toDouble(),
-            onChanged: (v) => setState(() => s.maxFileMb = v.round()),
-            onChangeEnd: (_) => widget.app.saveSettings(),
-          ),
-        ),
-        ListTile(
-          title: const Text('Лимит папки с файлами'),
-          subtitle: const Text('Когда лимит превышен, старые файлы удаляются первыми'),
-          trailing: DropdownButton<int>(
-            value: cap,
-            items: [for (final c in caps) DropdownMenuItem(value: c, child: Text(c == 0 ? 'Без лимита' : fmtSize(c * 1024 * 1024)))],
-            onChanged: (v) {
-              s.capMb = v ?? 2048;
-              Store.prune(s.capMb);
-              widget.app.saveSettings();
+    ]);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final t = Theme.of(context).textTheme.titleSmall;
+    return Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+      SwitchListTile(
+        contentPadding: EdgeInsets.zero,
+        title: const Text('Тёмная тема'),
+        value: s.dark,
+        onChanged: (v) {
+          s.dark = v;
+          widget.app.saveSettings();
+          setState(() {});
+        },
+      ),
+      const SizedBox(height: 12),
+      Text('Автосохранять файлы до', style: t),
+      const SizedBox(height: 6),
+      chips(sizes, s.maxFileMb, (v) => '$v МБ', (v) => s.maxFileMb = v),
+      const SizedBox(height: 16),
+      Text('Лимит папки с файлами', style: t),
+      Text('Когда лимит превышен, старые файлы удаляются первыми', style: Theme.of(context).textTheme.bodySmall),
+      const SizedBox(height: 6),
+      chips(caps, s.capMb, (v) => v == 0 ? 'Без лимита' : fmtSize(v * 1024 * 1024), (v) => s.capMb = v),
+      const SizedBox(height: 16),
+      Row(children: [
+        Expanded(child: Text('Занято файлами: ${fmtSize(Store.usedBytes())}')),
+        TextButton(
+            onPressed: () {
+              Store.clearFiles();
               setState(() {});
             },
-          ),
-        ),
-        ListTile(
-          title: Text('Занято файлами: ${fmtSize(Store.usedBytes())}'),
-          trailing: TextButton(
-              onPressed: () {
-                Store.clearFiles();
-                setState(() {});
-              },
-              child: const Text('Очистить')),
-        ),
+            child: const Text('Очистить')),
       ]),
-    );
+    ]);
   }
 }

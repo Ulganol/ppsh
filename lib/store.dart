@@ -32,8 +32,15 @@ class Store {
   static late Directory root, filesDir, tmpDir;
 
   static Future<void> init() async {
-    final d = await getApplicationSupportDirectory();
-    root = Directory('${d.path}/p2pchat')..createSync(recursive: true);
+    // portable-режим: если рядом с программой лежит portable.flag, данные хранятся рядом с ней
+    final exeDir = File(Platform.resolvedExecutable).parent.path;
+    final String base;
+    if ((Platform.isWindows || Platform.isLinux) && File('$exeDir/portable.flag').existsSync()) {
+      base = '$exeDir/data';
+    } else {
+      base = (await getApplicationSupportDirectory()).path;
+    }
+    root = Directory('$base/p2pchat')..createSync(recursive: true);
     filesDir = Directory('${root.path}/files')..createSync(recursive: true);
     tmpDir = Directory('${root.path}/tmp');
     if (tmpDir.existsSync()) tmpDir.deleteSync(recursive: true);

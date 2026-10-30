@@ -91,6 +91,7 @@ class Dl {
 const _trackers = [
   'wss://tracker.openwebtorrent.com',
   'wss://tracker.webtorrent.dev',
+  'wss://tracker.btorrent.xyz',
   'wss://tracker.files.fm:7073/announce',
 ];
 
@@ -98,7 +99,12 @@ const _rtcConfig = {
   'iceServers': [
     {
       'urls': ['stun:stun.l.google.com:19302', 'stun:stun1.l.google.com:19302', 'stun:global.stun.twilio.com:3478']
-    }
+    },
+    {
+      'urls': ['turn:openrelay.metered.ca:80', 'turn:openrelay.metered.ca:443', 'turns:openrelay.metered.ca:443?transport=tcp'],
+      'username': 'openrelayproject',
+      'credential': 'openrelayproject',
+    },
   ],
   'sdpSemantics': 'unified-plan',
 };
@@ -116,6 +122,16 @@ class Room extends ChangeNotifier {
   final _socks = <String, WebSocketChannel>{};
   final _dls = <String, Dl>{};
   final myId = randStr(20);
+  final _log = <String>[];
+  void log(String t) {
+    _log.add('${DateTime.now().toIso8601String().substring(11, 19)} $t');
+    if (_log.length > 80) _log.removeAt(0);
+  }
+
+  int get trackersUp => _socks.length;
+  int get trackersTotal => _trackers.length;
+  String diag() =>
+      'Трекеры: ${_socks.length}/${_trackers.length}\nУчастников подключено: ${peers.length}\nСоединений в процессе: ${_conns.length}\n---\n${_log.join('\n')}';
   final _aes = AesGcm.with256bits();
 
   late Uint8List _hashBytes;
@@ -209,9 +225,11 @@ class Room extends ChangeNotifier {
       await ws.ready;
       final w = ws;
       _socks[url] = w;
+      log('трекер подключён: ${Uri.parse(url).host}');
       w.stream.listen((d) => _onTracker(w, d), onDone: () => _retry(url, w), onError: (_) => _retry(url, w));
       _announce(w);
-    } catch (_) {
+    } catch (e) {
+      log('трекер недоступен ${Uri.parse(url).host}: $e');
       _retry(url, ws);
     }
   }
@@ -230,7 +248,14 @@ class Room extends ChangeNotifier {
 
   Future<void> _announce(WebSocketChannel ws) async {
     try {
-      final cs = await Future.wait(List.generate(3, (_) => _newOffer()));
+      final res = await Future.wait(List.generate(
+          3,
+          (_) => _newOffer().then<Conn?>((c) => c).catchError((Object e) {
+                log('ошибка создания оффера: $e');
+                return null;
+              })));
+      final cs = res.whereType<Conn>().toList();
+      if (cs.isEmpty) return;
       _tsend(ws, {
         'action': 'announce',
         'info_hash': _ih,
@@ -247,27 +272,38 @@ class Room extends ChangeNotifier {
         'downloaded': 0,
         'left': 1,
       });
-    } catch (_) {}
+    } catch (e) {
+      log('ошибка announce: $e');
+    }
   }
 
   Future<void> _onTracker(WebSocketChannel ws, dynamic raw) async {
     try {
       final j = jsonDecode(raw is String ? raw : utf8.decode(raw));
-      if (j is! Map || j['info_hash'] != _ih) return;
+      if (j is! Map) return;
+      if (j['failure reason'] != null) {
+        log('трекер: ${j['failure reason']}');
+        return;
+      }
+      if (j['info_hash'] != _ih && j['info_hash'] != id) return;
       final pid = j['peer_id'];
       if (pid is! String || pid == myId) return;
       final oid = j['offer_id'];
       if (oid is! String) return;
       if (j['offer'] is Map) {
+        log('получен оффер от ${pid.substring(0, 6)}');
         await _answer(ws, pid, oid, j['offer']);
       } else if (j['answer'] is Map) {
+        log('получен ответ от ${pid.substring(0, 6)}');
         final c = _pending.remove(oid);
         if (c != null && !c.dead) {
           c.remoteId = pid;
           await c.pc.setRemoteDescription(RTCSessionDescription(j['answer']['sdp'], 'answer'));
         }
       }
-    } catch (_) {}
+    } catch (e) {
+      log('ошибка обработки сообщения трекера: $e');
+    }
   }
 
   Future<void> _gathered(RTCPeerConnection pc) {
@@ -281,6 +317,7 @@ class Room extends ChangeNotifier {
   void _watch(Conn c) {
     _conns.add(c);
     c.pc.onConnectionState = (s) {
+      log('соединение ${c.remoteId.isEmpty ? '?' : c.remoteId.substring(0, 6)}: ${s.name}');
       if (s == RTCPeerConnectionState.RTCPeerConnectionStateFailed ||
           s == RTCPeerConnectionState.RTCPeerConnectionStateClosed) {
         _drop(c);
@@ -349,6 +386,7 @@ class Room extends ChangeNotifier {
   void _onOpen(Conn c) {
     if (c.open || c.dead || c.remoteId.isEmpty) return;
     c.open = true;
+    log('канал открыт: ${c.remoteId.substring(0, 6)}');
     _pending.remove(c.offerId);
     final ex = peers[c.remoteId];
     if (ex != null && ex != c) {
