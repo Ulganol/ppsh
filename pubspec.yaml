@@ -1,0 +1,19 @@
+name: p2pchat
+description: Serverless P2P chat
+publish_to: none
+version: 1.0.0+1
+environment:
+  sdk: ">=3.4.0 <4.0.0"
+dependencies:
+  flutter:
+    sdk: flutter
+  flutter_webrtc: any
+  web_socket_channel: any
+  cryptography: any
+  crypto: any
+  path_provider: any
+  file_picker: any
+  open_filex: any
+  emoji_picker_flutter: any
+flutter:
+  uses-material-design: true

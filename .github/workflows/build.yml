@@ -1,0 +1,49 @@
+name: build
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+defaults:
+  run:
+    shell: bash
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with: { channel: stable, cache: true }
+      - run: |
+          flutter create --platforms=windows --project-name p2pchat _app
+          rm -rf _app/lib _app/test && cp -r lib _app/lib && cp pubspec.yaml _app/pubspec.yaml
+          cd _app && flutter pub get && flutter build windows --release
+      - uses: actions/upload-artifact@v4
+        with: { name: p2pchat-windows, path: _app/build/windows/x64/runner/Release }
+  android:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with: { distribution: temurin, java-version: '17' }
+      - uses: subosito/flutter-action@v2
+        with: { channel: stable, cache: true }
+      - run: |
+          flutter create --platforms=android --project-name p2pchat --org com.example _app
+          rm -rf _app/lib _app/test && cp -r lib _app/lib && cp pubspec.yaml _app/pubspec.yaml
+          sed -i 's#<manifest xmlns:android="http://schemas.android.com/apk/res/android">#&<uses-permission android:name="android.permission.INTERNET"/><uses-permission android:name="android.permission.ACCESS_NETWORK_STATE"/>#' _app/android/app/src/main/AndroidManifest.xml
+          cd _app && flutter pub get && flutter build apk --release
+      - uses: actions/upload-artifact@v4
+        with: { name: p2pchat-android, path: _app/build/app/outputs/flutter-apk/app-release.apk }
+  linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo apt-get update && sudo apt-get install -y clang cmake ninja-build pkg-config libgtk-3-dev
+      - uses: subosito/flutter-action@v2
+        with: { channel: stable, cache: true }
+      - run: |
+          flutter create --platforms=linux --project-name p2pchat _app
+          rm -rf _app/lib _app/test && cp -r lib _app/lib && cp pubspec.yaml _app/pubspec.yaml
+          cd _app && flutter pub get && flutter build linux --release
+      - uses: actions/upload-artifact@v4
+        with: { name: p2pchat-linux, path: _app/build/linux/x64/release/bundle }
